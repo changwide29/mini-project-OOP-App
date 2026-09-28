@@ -1,0 +1,122 @@
+<?php
+require_once '../config/database.php';
+require_once '../includes/functions.php';
+require_once '../includes/auth.php';
+
+check_admin_login();
+
+$id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$error = '';
+
+// ดึงข้อมูลหมวดหมู่ปัจจุบัน
+$stmt = $pdo->prepare("SELECT * FROM categories WHERE id = ?");
+$stmt->execute([$id]);
+$category = $stmt->fetch();
+
+if (!$category) {
+    $_SESSION['error'] = "ไม่พบข้อมูลหมวดหมู่ที่ต้องการแก้ไข";
+    header("Location: categories.php");
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!verify_csrf_token($_POST['csrf_token'])) {
+        $error = "CSRF Token ไม่ถูกต้อง";
+    } else {
+        $name = trim($_POST['name']);
+        $slug = trim($_POST['slug']);
+        $description = trim($_POST['description']);
+        $status = $_POST['status'];
+
+        // ตรวจสอบว่า slug ซ้ำหรือไม่ (ยกเว้นตัวเอง)
+        $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM categories WHERE slug = ? AND id != ?");
+        $stmtCheck->execute([$slug, $id]);
+        
+        if ($stmtCheck->fetchColumn() > 0) {
+            $error = "Slug นี้มีในระบบแล้ว กรุณาใช้ชื่ออื่น";
+        } else {
+            // บันทึกการอัปเดตลงฐานข้อมูล
+            $updateStmt = $pdo->prepare("UPDATE categories SET name = ?, slug = ?, description = ?, status = ? WHERE id = ?");
+            if ($updateStmt->execute([$name, $slug, $description, $status, $id])) {
+                $_SESSION['success'] = "อัปเดตข้อมูลหมวดหมู่เรียบร้อยแล้ว";
+                header("Location: categories.php");
+                exit;
+            } else {
+                $error = "เกิดข้อผิดพลาดในการบันทึกข้อมูล";
+            }
+        }
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>แก้ไขหมวดหมู่ - Admin Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body class="bg-gray-100 font-sans flex flex-col md:flex-row min-h-screen">
+
+    <?php include '../includes/admin_sidebar.php'; ?>
+
+    <main class="flex-1 w-full p-4 md:p-8">
+        
+        <div class="mb-6">
+            <a href="categories.php" class="text-gray-500 hover:text-blue-600 transition text-sm font-semibold">
+                <i class="fas fa-arrow-left mr-1"></i> กลับไปหน้ารายการหมวดหมู่
+            </a>
+            <h1 class="text-2xl font-bold text-gray-800 mt-2">แก้ไขหมวดหมู่: <?php echo escape($category['name']); ?></h1>
+        </div>
+
+        <?php if ($error): ?>
+            <script>Swal.fire({ icon: 'error', title: 'ไม่สามารถบันทึกได้', text: '<?php echo escape($error); ?>' });</script>
+        <?php endif; ?>
+
+        <div class="bg-white rounded-lg shadow-sm p-6 md:p-8 max-w-3xl">
+            <form method="POST" action="">
+                <input type="hidden" name="csrf_token" value="<?php echo generate_csrf_token(); ?>">
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">ชื่อหมวดหมู่ <span class="text-red-500">*</span></label>
+                        <input type="text" name="name" value="<?php echo escape($category['name']); ?>" required 
+                               class="shadow-sm border rounded w-full py-2 px-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">Slug (URL ของหมวดหมู่) <span class="text-red-500">*</span></label>
+                        <input type="text" name="slug" value="<?php echo escape($category['slug']); ?>" required pattern="[a-zA-Z0-9-]+" title="ภาษาอังกฤษ ตัวเลข และขีดกลาง (-) เท่านั้น"
+                               class="shadow-sm border rounded w-full py-2 px-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <p class="text-xs text-gray-500 mt-1">ใช้ตัวอักษรภาษาอังกฤษ ตัวเลข และขีดกลาง (-) เท่านั้น ไม่เว้นวรรค</p>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">รายละเอียด (ทางเลือก)</label>
+                    <textarea name="description" rows="3" 
+                              class="shadow-sm border rounded w-full py-2 px-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"><?php echo escape($category['description']); ?></textarea>
+                </div>
+
+                <div class="mb-8">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">สถานะ</label>
+                    <select name="status" class="shadow-sm border rounded w-full py-2 px-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="active" <?php echo ($category['status'] == 'active') ? 'selected' : ''; ?>>เปิดใช้งาน (แสดงหน้าร้าน)</option>
+                        <option value="inactive" <?php echo ($category['status'] == 'inactive') ? 'selected' : ''; ?>>ซ่อนไว้ (ไม่แสดงหน้าร้าน)</option>
+                    </select>
+                </div>
+
+                <div class="flex items-center">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded shadow transition mr-4">
+                        <i class="fas fa-save mr-2"></i> บันทึกการเปลี่ยนแปลง
+                    </button>
+                    <a href="categories.php" class="text-gray-500 hover:text-gray-800 font-semibold transition">ยกเลิก</a>
+                </div>
+            </form>
+        </div>
+
+    </main>
+
+</body>
+</html>
